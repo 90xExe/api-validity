@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Key-manager{% endblock %}
+
+{% block content %}
+<div class="p-3 p-md-5 mb-4 bg-light rounded-3">
+    <div class="container py-4 text-center">
+        <h1 class="display-6 display-md-5 fw-bold">Bienvenue sur votre gestionnaire de clés API !</h1>
+        <p class="fs-5 mx-auto col-12 col-md-10 col-lg-8">
+            Créez des clés personnalisées, définissez des limites d'utilisation et des périodes de validité, et suivez leurs performances.
+        </p>
+
+        <!-- Messages Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="row justify-content-center">
+                    <div class="col-12 col-md-8 col-lg-6">
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if session.user %}
+            <p class="fs-5 mt-4">Vous êtes connecté en tant que <strong>{{ session.user }}</strong>.</p>
+            <div class="d-flex flex-column flex-md-row justify-content-center align-items-center gap-3 mt-4">
+                <a class="btn btn-primary btn-lg w-100 w-md-auto" href="{{ url_for('admin_panel') }}">Panneau d'administration</a>
+                <a class="btn btn-danger btn-lg w-100 w-md-auto" href="{{ url_for('logout') }}">Déconnexion</a>
+            </div>
+        {% else %}
+            <!-- Login Form -->
+            <div class="row justify-content-center mt-5">
+                <div class="col-12 col-sm-10 col-md-8 col-lg-6">
+                    <form method="POST" action="{{ url_for('login') }}">
+                        <h3 class="text-center mb-4">Connexion</h3>
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Adresse e-mail</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
+                        <div class="mb-4">
+                            <label for="password" class="form-label">Mot de passe</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Se connecter</button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

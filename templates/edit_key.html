@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Modifier Clé API{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Modifier Clé API: <br><small class="text-muted"><code>{{ key.key }}</code></small></h1>
+
+<div class="card mb-4">
+    <div class="card-header bg-warning text-dark">
+        <h2>Informations sur la Clé</h2>
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('edit_key', key_id=key._id) }}" method="POST" class="row g-3">
+            <div class="col-md-12">
+                <label for="name" class="form-label">Nom de la Clé <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="name" name="name" value="{{ key.name }}" required>
+            </div>
+
+            <div class="col-md-6">
+                <label for="usage_limit" class="form-label">Nouvelle Limite d'Utilisation Totale (vide pour illimité):</label>
+                <input type="number" class="form-control" id="usage_limit" name="usage_limit" min="0" value="{{ key.usage_limit if key.usage_limit is not none else '' }}">
+            </div>
+
+            <div class="col-md-6">
+                <label for="rate_limit_per_minute" class="form-label">Nouvelle Limite de Requêtes / Minute (vide pour illimité):</label>
+                <input type="number" class="form-control" id="rate_limit_per_minute" name="rate_limit_per_minute" min="0" value="{{ key.rate_limit_per_minute if key.rate_limit_per_minute is not none else '' }}">
+            </div>
+
+            <div class="col-md-12">
+                <label for="expires_at" class="form-label">Nouvelle Date et Heure d'Expiration (vide pour jamais):</label>
+                <input type="datetime-local" class="form-control" id="expires_at" name="expires_at" value="{{ key.expires_at_formatted }}">
+            </div>
+            
+            <!-- <div class="col-md-12">
+                <label for="permissions" class="form-label">Permissions (séparées par des virgules, ex: read,write)</label>
+                <input type="text" class="form-control" id="permissions" name="permissions" value="{{ key.permissions_str }}" placeholder="Ex: user_data:read,payments:write">
+            </div> -->
+
+            <div class="col-md-6 form-check form-switch mt-3">
+                <input class="form-check-input" type="checkbox" role="switch" id="is_active" name="is_active" {% if key.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="is_active">Clé Active</label>
+            </div>
+
+            <div class="col-md-6 form-check form-switch mt-3">
+                <input class="form-check-input" type="checkbox" role="switch" id="reset_usage" name="reset_usage">
+                <label class="form-check-label" for="reset_usage">Réinitialiser l'utilisation actuelle à 0</label>
+            </div>
+
+            <div class="col-12 mt-4">
+                <button type="submit" class="btn btn-primary me-2"><i class="bi bi-save"></i> Enregistrer les Modifications</button>
+                <a href="{{ url_for('admin_panel') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Retour au Panel Admin</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

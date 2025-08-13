@@ -1,0 +1,370 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from pymongo import MongoClient
+from datetime import datetime, timedelta
+import uuid # For generating unique API keys
+import os # For environment variables
+from bson.objectid import ObjectId # For handling MongoDB IDs
+
+# Flask application configuration
+app = Flask(__name__)
+
+# --- Configuration (to be placed in config.py or environment variables in production) ---
+class Config:
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'your_super_complex_and_long_secret_key_for_session'
+    MONGO_URI = os.environ.get('MONGO_URI') or 'mongodb://localhost:27017/'
+    MONGO_DB_NAME = os.environ.get('MONGO_DB_NAME') or 'api_key_manager'
+
+app.config.from_object(Config) # Load configuration from the Config class
+
+# --- MongoDB Connection ---
+try:
+    client = MongoClient(app.config['MONGO_URI'])
+    db = client[app.config['MONGO_DB_NAME']]
+    api_keys_collection = db.api_keys
+    print("MongoDB connection successful!")
+except Exception as e:
+    print(f"MongoDB connection failed: {e}")
+    # In a production environment, you might want to exit or log the error more robustly.
+
+# --- Utility Functions ---
+def generate_api_key_data(name, limit, rate_limit_per_minute, duration_value, duration_unit, custom_key=None):
+    """Generates initial data for a new API key."""
+    key = custom_key if custom_key else str(uuid.uuid4())
+    expiration_date = None
+
+    if duration_value and duration_unit:
+        try:
+            duration_value = int(duration_value)
+            if duration_unit == 'days':
+                expiration_date = datetime.utcnow() + timedelta(days=duration_value)
+            elif duration_unit == 'months':
+                # Approximation for months, adjust if strict calendar precision is required
+                expiration_date = datetime.utcnow() + timedelta(days=duration_value * 30)
+            elif duration_unit == 'years':
+                # Approximation for years
+                expiration_date = datetime.utcnow() + timedelta(days=duration_value * 365)
+        except ValueError:
+            # Handle the case where duration_value is not a valid integer
+            pass # Expiration will remain None if conversion fails
+
+    return {
+        "key": key,
+        "name": name, # New field: Key Name
+        "usage_limit": int(limit) if limit else None, # None if no limit
+        "rate_limit_per_minute": int(rate_limit_per_minute) if rate_limit_per_minute else None, # New field: Requests per minute limit
+        "current_usage": 0,
+        "created_at": datetime.utcnow(),
+        "expires_at": expiration_date,
+        "is_active": True,
+        "usage_hourly_stats": {} # Hourly usage statistics
+    }
+
+# --- Flask Routes ---
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    email = request.form.get('email')
+    password = request.form.get('password')
+    
+    # Basic authentication (adapt according to your logic, e.g., user database)
+    if email == "fakethug@gmail.com" and password == "1":
+        session['user'] = email
+        flash('Login successful!', 'success') # Success flash message
+        return redirect(url_for('admin_panel'))
+    else:
+        flash('Invalid credentials. Please try again.', 'error') # Error flash message
+        return redirect(url_for('index')) # Redirect to login page with error
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None) # Remove user from session
+    flash('You have been logged out.', 'info') # Info flash message
+    return redirect(url_for('index'))
+
+@app.route('/admin')
+def admin_panel():
+    if 'user' not in session:
+        flash('Please log in to access the admin panel.', 'warning') # Warning flash message
+        return redirect(url_for('index'))
+    else:
+        keys = api_keys_collection.find({})
+        return render_template('admin.html', keys=keys)
+    
+@app.route('/admin/generate_key', methods=['POST'])
+def generate_new_key():
+    if 'user' not in session:
+        flash('Unauthorized access.', 'error')
+        return redirect(url_for('index'))
+    try:
+        name = request.form.get('name')
+        usage_limit = request.form.get('usage_limit')
+        rate_limit_per_minute = request.form.get('rate_limit_per_minute')
+        validity_duration = request.form.get('validity_duration')
+        validity_period_type = request.form.get('validity_period_type')
+        custom_key = request.form.get('custom_key')
+
+        if not name:
+            flash('Key name is required.', 'error')
+            return redirect(url_for('admin_panel'))
+
+        if custom_key:
+            existing_key = api_keys_collection.find_one({"key": custom_key})
+            if existing_key:
+                flash(f'Custom key "{custom_key}" already exists. Please choose another one.', 'error')
+                return redirect(url_for('admin_panel'))
+
+        new_key_data = generate_api_key_data(
+            name, usage_limit, rate_limit_per_minute, validity_duration, validity_period_type, custom_key
+        )
+        api_keys_collection.insert_one(new_key_data)
+        flash('API Key generated successfully!', 'success')
+    except Exception as e:
+        flash(f'Error generating key: {e}', 'error')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/toggle_key/<key_id>')
+def toggle_key_status(key_id):
+    if 'user' not in session:
+        flash('Unauthorized access.', 'error')
+        return redirect(url_for('index'))
+    try:
+        key_obj_id = ObjectId(key_id)
+        api_key = api_keys_collection.find_one({"_id": key_obj_id})
+        if api_key:
+            new_status = not api_key['is_active']
+            api_keys_collection.update_one(
+                {"_id": key_obj_id},
+                {"$set": {"is_active": new_status}}
+            )
+            flash(f'Key "{api_key["name"]}" status toggled to {"Active" if new_status else "Inactive"}', 'success')
+        else:
+            flash('Key not found.', 'error')
+    except Exception as e:
+        flash(f'Error changing key status: {e}', 'error')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/delete_key/<key_id>')
+def delete_key(key_id):
+    if 'user' not in session:
+        flash('Unauthorized access.', 'error')
+        return redirect(url_for('index'))
+    try:
+        key_obj_id = ObjectId(key_id)
+        key_to_delete = api_keys_collection.find_one({"_id": key_obj_id})
+        key_name = key_to_delete.get('name', 'Unknown Key') if key_to_delete else 'Unknown Key'
+
+        result = api_keys_collection.delete_one({"_id": key_obj_id})
+        if result.deleted_count == 1:
+            flash(f'API Key "{key_name}" deleted successfully!', 'success')
+        else:
+            flash('Key not found.', 'error')
+    except Exception as e:
+        flash(f'Error deleting key: {e}', 'error')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/edit_key/<key_id>', methods=['GET', 'POST'])
+def edit_key(key_id):
+    if 'user' not in session:
+        flash('Unauthorized access.', 'error')
+        return redirect(url_for('index'))
+    try:
+        key_obj_id = ObjectId(key_id)
+        key_data = api_keys_collection.find_one({"_id": key_obj_id})
+
+        if not key_data:
+            flash('API Key not found.', 'error')
+            return redirect(url_for('admin_panel'))
+
+        if request.method == 'POST':
+            new_name = request.form.get('name')
+            new_usage_limit = request.form.get('usage_limit')
+            new_rate_limit_per_minute = request.form.get('rate_limit_per_minute')
+            new_expires_at_str = request.form.get('expires_at')
+            new_status = request.form.get('is_active') == 'on'
+            
+            if not new_name:
+                flash('Key name is required.', 'error')
+                return redirect(url_for('edit_key', key_id=key_id))
+
+            update_fields = {
+                'name': new_name,
+                'is_active': new_status
+            }
+
+            update_fields['usage_limit'] = int(new_usage_limit) if new_usage_limit and new_usage_limit.strip() != '' else None
+            update_fields['rate_limit_per_minute'] = int(new_rate_limit_per_minute) if new_rate_limit_per_minute and new_rate_limit_per_minute.strip() != '' else None
+
+            if new_expires_at_str and new_expires_at_str.strip() != '':
+                try:
+                    update_fields['expires_at'] = datetime.strptime(new_expires_at_str, '%Y-%m-%dT%H:%M')
+                except ValueError:
+                    flash('Invalid date/time format for expiration.', 'error')
+                    return redirect(url_for('edit_key', key_id=key_id))
+            else:
+                update_fields['expires_at'] = None
+            
+            reset_usage = request.form.get('reset_usage')
+            if reset_usage == 'on':
+                update_fields['current_usage'] = 0
+
+            api_keys_collection.update_one(
+                {"_id": key_obj_id},
+                {"$set": update_fields}
+            )
+            flash(f'API Key "{new_name}" modified successfully!', 'success')
+            return redirect(url_for('admin_panel'))
+
+        if key_data.get('expires_at'):
+            key_data['expires_at_formatted'] = key_data['expires_at'].strftime('%Y-%m-%dT%H:%M')
+        else:
+            key_data['expires_at_formatted'] = ''
+        
+        return render_template('edit_key.html', key=key_data)
+
+    except Exception as e:
+        flash(f'Error modifying key: {e}', 'error')
+        return redirect(url_for('admin_panel'))
+
+
+
+
+# --- API Endpoint for Key Validation (Used by your external API) ---
+@app.route('/api/validate_key', methods=['GET'])
+def validate_api_key():
+    api_key = request.args.get('key')
+    if not api_key:
+        # 400 Bad Request: Missing API key in request
+        return jsonify({'status': 'error',
+                        'message': 'API key missing'}), 400
+
+    # First, find the key without incrementing usage
+    key_data = api_keys_collection.find_one({"key": api_key})
+
+    if not key_data:
+        # 401 Unauthorized: Invalid or unrecognized API key
+        return jsonify({'status': 'error',
+                        'message': 'Invalid API key'}), 401
+
+    # Prepare common details to include in responses where key_data is available
+    common_details = {
+        'name': key_data.get('name'),
+        'usage_limit': key_data.get('usage_limit'),
+        'current_usage': key_data.get('current_usage'),
+        'rate_limit_per_minute': key_data.get('rate_limit_per_minute'),
+        'expires_at': key_data['expires_at'].isoformat() if key_data.get('expires_at') else None
+    }
+
+    if not key_data.get('is_active', False):
+        response_data = {
+            'status': 'error',
+            'message': 'API key inactive'
+            }
+        response_data.update(common_details)
+        return jsonify(response_data), 401
+
+    if key_data.get('expires_at') and datetime.utcnow() > key_data['expires_at']:
+        # Optional: deactivate the key if it has expired
+        api_keys_collection.update_one({"key": api_key}, {"$set": {"is_active": False}})
+        response_data = {
+            'status': 'error',
+            'message': 'API key expired'
+            }
+        response_data.update(common_details)
+        return jsonify(response_data), 401
+
+    # Check total usage limit BEFORE incrementing
+    if key_data.get('usage_limit') is not None and key_data.get('current_usage', 0) >= key_data['usage_limit']:
+        # 429 Too Many Requests: Total API key usage limit reached
+        response_data = {
+            'status': 'error',
+            'message': 'Total API key usage limit reached'
+                         }
+        response_data.update(common_details)
+        return jsonify(response_data), 429
+
+    # If all checks pass, then atomically increment usage
+    current_hour_str = datetime.utcnow().strftime('%Y-%m-%d-%H')
+    updated_key_data = api_keys_collection.find_one_and_update(
+        {"key": api_key},
+        {
+            "$inc": {
+                "current_usage": 1,
+                f"usage_hourly_stats.{current_hour_str}": 1
+            }
+        },
+        return_document=True # Important: returns the document after update
+    )
+
+    # Re-check updated_key_data in case of a race condition (though less likely after initial find)
+    if not updated_key_data:
+        # This case should ideally not happen if find_one was successful, but as a safeguard
+        return jsonify({'status': 'error', 'message': 'API key validation failed after increment attempt'}), 500
+
+    # 200 OK: Valid API key and usage incremented
+    # The common_details are already structured for this, just ensuring it's updated_key_data
+    return jsonify({
+        'status': 'success',
+        'message': 'API key valid',
+        'name': updated_key_data.get('name'),
+        'usage_limit': updated_key_data.get('usage_limit'),
+        'current_usage': updated_key_data.get('current_usage'),
+        'rate_limit_per_minute': updated_key_data.get('rate_limit_per_minute'),
+        'expires_at': updated_key_data['expires_at'].isoformat() if updated_key_data.get('expires_at') else None
+    }), 200
+
+# --- NEW ENDPOINT: Undo usage ---
+@app.route('/api/undo_usage', methods=['GET']) # Changed to GET method
+def undo_api_usage():
+    api_key = request.args.get('key') # Get key from query parameters
+    if not api_key:
+        # 400 Bad Request: Missing API key in request body
+        return jsonify({'status': 'error', 'message': 'API key missing in request parameters'}), 400 # Updated message
+
+    current_hour_str = datetime.utcnow().strftime('%Y-%m-%d-%H')
+
+    # Retrieve the key to check current usage before decrementing
+    key_data = api_keys_collection.find_one({"key": api_key})
+
+    if not key_data:
+        # 404 Not Found: Invalid or unrecognized API key
+        return jsonify({'status': 'error', 'message': 'Invalid or unrecognized API key'}), 404
+
+    update_operations = {}
+
+    # Decrement current_usage if > 0
+    if key_data.get('current_usage', 0) > 0:
+        update_operations["$inc"] = {"current_usage": -1}
+    else:
+        # If usage is already zero, it cannot be decremented further
+        print(f"Attempt to decrement usage for key {api_key} when it's already 0.")
+
+    # Decrement usage_hourly_stats if > 0 for the current hour
+    hourly_stats = key_data.get('usage_hourly_stats', {})
+    if hourly_stats.get(current_hour_str, 0) > 0:
+        if "$inc" not in update_operations:
+            update_operations["$inc"] = {}
+        update_operations["$inc"][f"usage_hourly_stats.{current_hour_str}"] = -1
+    else:
+        print(f"Attempt to decrement hourly usage for key {api_key} ({current_hour_str}) when it's already 0.")
+
+    if update_operations:
+        try:
+            api_keys_collection.update_one({"key": api_key}, update_operations)
+            # 200 OK: Usage decremented successfully
+            return jsonify({'status': 'success', 'message': 'API key usage decremented successfully'}), 200
+        except Exception as e:
+            # 500 Internal Server Error: Error during decrement
+            return jsonify({'status': 'error', 'message': f'Error decrementing usage: {e}'}), 500
+    else:
+        # 200 OK: No action needed (usage already zero)
+        return jsonify({'status': 'info', 'message': 'No usage to decrement for this key/hour'}), 200
+
+
+# if __name__ == '__main__':
+#     app.run(debug=True)
+if __name__ == "__main__":
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=5000)

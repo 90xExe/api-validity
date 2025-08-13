@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Key-manager{% endblock %}
+
+{% block head_extra %}
+<style>
+    .table th, .table td {
+        vertical-align: middle;
+        text-align: center;
+    }
+
+    .table td.text-break {
+        word-break: break-all;
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .permissions-badges .badge {
+        display: inline-block;
+        margin-bottom: 5px;
+    }
+
+    .modal-header .btn-close {
+        filter: invert(1) brightness(2);
+    }
+
+    .btn-action-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    @media (max-width: 767.98px) {
+        .btn-action-group {
+            flex-direction: row;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .btn-action-group .btn {
+            flex-grow: 1;
+        }
+
+        .table thead {
+            display: none;
+        }
+
+        .table tbody tr {
+            display: block;
+            margin-bottom: 0.625em;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+        }
+
+        .table td {
+            display: block;
+            text-align: left;
+            font-size: 0.9em;
+            padding-left: 50%;
+            position: relative;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .table td::before {
+            content: attr(data-label);
+            position: absolute;
+            left: 0;
+            width: 45%;
+            padding-left: 15px;
+            font-weight: bold;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .table td:last-child {
+            border-bottom: 0;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">API KEY MANAGER</h1>
+    <a href="{{ url_for('logout') }}" class="btn btn-danger">
+        <i class="bi bi-box-arrow-right"></i> Déconnexion
+    </a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h2 class="mb-0">Generate </h2>
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('generate_new_key') }}" method="POST" class="row g-3 row-cols-1 row-cols-md-2 row-cols-lg-3">
+            <div class="col">
+                <label for="name" class="form-label">Key Name<span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="name" name="name" required placeholder="Ex: Alok">
+            </div>
+            <div class="col">
+                <label for="custom_key" class="form-label">Custom Key</label>
+                <input type="text" class="form-control" id="custom_key" name="custom_key" placeholder="Ex : Zava">
+            </div>
+            <div class="col">
+                <label for="usage_limit" class="form-label">Rate limit</label>
+                <input type="number" class="form-control" id="usage_limit" name="usage_limit" min="0" placeholder="Ex: 10000">
+            </div>
+            <div class="col">
+                <label for="rate_limit_per_minute" class="form-label">Rate/min</label>
+                <input type="number" class="form-control" id="rate_limit_per_minute" name="rate_limit_per_minute" min="0" placeholder="Ex: 60">
+            </div>
+            <div class="col">
+                <label for="validity_duration" class="form-label">Expiration</label>
+                <input type="number" class="form-control" id="validity_duration" name="validity_duration" min="1" placeholder="Ex: 30">
+            </div>
+            <div class="col">
+                <label for="validity_period_type" class="form-label">Unit of Duration</label>
+                <select name="validity_period_type" id="validity_period_type" class="form-select">
+                    <option value="">No expiration</option>
+                    <option value="days">Jours</option>
+                    <option value="months">Mois</option>
+                    <option value="years">Années</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-success w-100">
+                    <i class="bi bi-key-fill"></i> Generate API Key
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<h2 class="mt-5 mb-3 text-center">Existing API Keys</h2>
+
+{% if keys %}
+<div class="table-responsive">
+    <table class="table table-striped table-hover">
+        <thead class="table-light">
+            <tr>
+                <th>Nom</th>
+                <th>Clé</th>
+                <th>Limite</th>
+                <th>Usage</th>
+                <th>Rate/min</th>
+                <th>Expiration</th>
+                <th>Statut</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key in keys %}
+            <tr>
+                <td data-label="Nom">{{ key.name }}</td>
+                <td data-label="Clé" class="text-break">{{ key.key }}</td>
+                <td data-label="Limite">{{ key.usage_limit if key.usage_limit is not none else 'Illimitée' }}</td>
+                <td data-label="Usage">{{ key.current_usage }}</td>
+                <td data-label="Rate/min">{{ key.rate_limit_per_minute if key.rate_limit_per_minute is not none else 'Illimitée' }}</td>
+                <td data-label="Expiration">{{ key.expires_at.strftime('%Y-%m-%d %H:%M') if key.expires_at else 'Jamais' }}</td>
+                <td data-label="Statut">
+                    {% if key.is_active %}
+                        <span class="badge bg-success">Active</span>
+                    {% else %}
+                        <span class="badge bg-danger">Inactive</span>
+                    {% endif %}
+                </td>
+                <td data-label="Actions">
+                    <div class="btn-action-group">
+                        <a href="{{ url_for('edit_key', key_id=key._id) }}" class="btn btn-sm btn-warning">
+                            <i class="bi bi-pencil-square"></i> Modifier
+                        </a>
+                        <a href="{{ url_for('toggle_key_status', key_id=key._id) }}" class="btn btn-sm {% if key.is_active %}btn-secondary{% else %}btn-success{% endif %}">
+                            <i class="bi bi-toggle-on"></i> {{ 'Désactiver' if key.is_active else 'Activer' }}
+                        </a>
+                        <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#usageStatsModal-{{ key._id }}">
+                            <i class="bi bi-bar-chart-fill"></i> Stats
+                        </button> 
+                        <a href="{{ url_for('delete_key', key_id=key._id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette clé ? Cette action est irréversible.')">
+                            <i class="bi bi-trash-fill"></i> Supprimer
+                        </a>
+                    </div>
+                </td>
+            </tr>
+
+            <!-- Modal Stats -->
+            <div class="modal fade" id="usageStatsModal-{{ key._id }}" tabindex="-1" aria-labelledby="usageStatsModalLabel-{{ key._id }}" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header bg-info text-white">
+                            <h5 class="modal-title" id="usageStatsModalLabel-{{ key._id }}">Stats: {{ key.name }}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                        </div>
+                        <div class="modal-body">
+                            {% if key.usage_hourly_stats %}
+                                <p class="fw-bold">Utilisation par heure :</p>
+                                <ul class="list-group">
+                                    {% for hour, count in key.usage_hourly_stats.items()|sort %}
+                                    <li class="list-group-item d-flex justify-content-between">
+                                        <span>Heure {{ hour }}:00</span>
+                                        <span class="badge bg-primary rounded-pill">{{ count }} utilisations</span>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p>Aucune statistique d'utilisation pour l'instant.</p>
+                            {% endif %}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info text-center">
+    Aucune clé API générée pour le moment.
+</div>
+{% endif %}
+{% endblock %}
